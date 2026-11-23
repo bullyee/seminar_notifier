@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Seminar 小幫手</title>
+<meta name="robots" content="noindex">
+<style>
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,"Noto Sans TC",sans-serif;margin:0;background:#f6f6f4;color:#222}
+  .top{position:sticky;top:0;z-index:5;background:#f6f6f4;border-bottom:1px solid #e2e2de;padding:12px 16px 0}
+  .title{font-size:17px;font-weight:600;margin-bottom:8px}
+  .tabs{display:flex;gap:4px}
+  .tab{flex:0 0 auto;background:none;border:0;border-bottom:3px solid transparent;padding:8px 14px;font:inherit;font-size:15px;color:#666;border-radius:0;min-width:0}
+  .tab.on{color:#2f5d8a;border-bottom-color:#2f5d8a;font-weight:600}
+  main{padding:16px;max-width:1200px;margin:0 auto}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:760px){.grid{grid-template-columns:1fr}}
+  .card{background:#fff;border:1px solid #e2e2de;border-radius:12px;padding:16px;margin-bottom:12px}
+  .grid .card{margin-bottom:0}
+  h2{font-size:16px;margin:0 0 2px} h3{font-size:14px;color:#555;margin:0 0 8px}
+  .meta{color:#666;font-size:13px;margin-bottom:8px}
+  label{display:block;font-size:13px;color:#555;margin:12px 0 4px}
+  input,textarea,select{width:100%;font:inherit;font-size:15px;padding:10px;border:1px solid #ccc;border-radius:8px;background:#fff}
+  textarea{min-height:200px;line-height:1.5} textarea.short{min-height:110px}
+  .hint{font-size:12px;color:#888;margin-top:4px}
+  .preview{border:1px solid #eee;background:#fafaf8;border-radius:8px;padding:12px;font-size:14px;line-height:1.6}
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  button{flex:1;min-width:100px;font:inherit;font-size:15px;padding:11px;border:0;border-radius:8px;background:#2f5d8a;color:#fff}
+  button.sec{background:#e4e4e0;color:#222} button.danger{background:#b3402e} button.small{flex:0 0 auto;min-width:0;padding:7px 12px;font-size:14px}
+  .badge{display:inline-block;font-size:12px;padding:2px 8px;border-radius:99px;margin-left:6px;vertical-align:middle}
+  .b-edit{background:#e3eefa;color:#2f5d8a} .b-cancel,.b-skip{background:#fbe3df;color:#8a2a1c} .b-hol{background:#fdeccf;color:#8a5a00}
+  .banner{padding:10px 12px;border-radius:8px;margin-bottom:14px;font-size:14px;background:#fff4d6;color:#7a5a00}
+  .banner.red{background:#fbe3df;color:#8a2a1c}
+  .empty{color:#777;font-size:14px;padding:12px 0}
+  .slot{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+  .slot .who{font-size:15px;margin-top:4px} .slot.off{opacity:.65}
+  .check{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:15px}
+  .check input{width:auto}
+  #toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:99px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw}
+  #toast.show{opacity:.92} #toast.err{background:#b3402e}
+</style></head><body>
+<div class="top"><div class="title">Seminar 小幫手</div>
+  <div class="tabs"><button class="tab" data-t="mails">信件</button><button class="tab" data-t="sched">排程</button><button class="tab" data-t="settings">設定</button></div>
+</div>
+<main id="main"></main>
+<div id="toast"></div>
+<script>
+const esc_ = function esc_(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); };
+const editableToHtml_ = function editableToHtml_(text) {
+  return esc_(text)
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2">$1</a>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/\n/g, '<br>');
+};
+/* ── 連線設定：存在這台裝置的瀏覽器裡，頁面本身不含任何金鑰 ── */
+const mem = {};
+const LS = {
+  get: k => { try { return localStorage.getItem(k); } catch (e) { return mem[k] || null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) { mem[k] = v; } },
+  del: k => { try { localStorage.removeItem(k); } catch (e) { delete mem[k]; } },
+};
+// 支援「網址#u=...&k=...」一鍵設定（Discord 預告裡的連結就是這種），讀完就把 # 後面清掉
+(function () {
+  const p = new URLSearchParams(location.hash.slice(1));
+  if (p.get('k')) {
+    LS.set('gas_key', p.get('k'));
+    if (p.get('u')) LS.set('gas_url', p.get('u'));
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+})();
+function normUrl(u) {
+  return String(u || '').trim().replace(/\?.*$/, '').replace(/#.*$/, '')
+    .replace(/\/a\/[^\/]+\/macros\//, '/macros/').replace(/\/macros\/u\/\d+\//, '/macros/');
+}
+let GAS_URL = normUrl(LS.get('gas_url'));
+let KEY = LS.get('gas_key') || '';
+let S = null;
+let loadErr = '';
+let loading = false;
+let tab = 'mails';
+const unsaved = {};          // 信件還沒存的輸入
+const openSlots = new Set(); // 排程頁展開中的場次
+const GROUPS = [
+  ['寄信', ['收件人', '寄件人顯示名稱', '簽名', '線上會議連結', '投影片備份連結', '本週祝福語']],
+  ['場次與輪替', ['預設時間', '預設地點', '間隔週數', '每場人數', '基準日期', '基準日第一位報告人']],
+  ['週一信時間', ['週一寄信時刻', '週一預告提前天數', '週一預告時刻']],
+  ['週二信時間', ['週二寄信時刻', '週二預告提前天數', '週二預告時刻']],
+  ['通知與假日', ['Discord Webhook', 'Discord 預告附網頁連結', '前端網頁網址', '自動跳過國定假日']],
+  ['狀態', ['測試模式', '全部暫停']],
+];
+const BOOLS = ["測試模式","全部暫停","自動跳過國定假日","Discord 預告附網頁連結"];
+const main = document.getElementById('main');
+
+let toastTimer;
+function toast(msg, err) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'show' + (err ? ' err' : '');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = '', err ? 5000 : 2200);
+}
+/* ── 跟 Apps Script 溝通：POST 純文字 JSON（不觸發 CORS 預檢），回來的一律是 {ok, data|error} ── */
+const ACTIONS = { webAll: 'all', webSave: 'save', webReset: 'reset', webSetCancelled: 'cancel',
+  webSendTest: 'sendTest', webSaveAdjust: 'adjust', webSaveSettings: 'settings' };
+async function api(action, args) {
+  let r;
+  try {
+    r = await fetch(GAS_URL, { method: 'POST', body: JSON.stringify({ key: KEY, action: action, args: args || [] }) });
+  } catch (e) {
+    throw new Error('連不到 Apps Script：檢查網址、網路，以及部署存取權是不是「任何人」');
+  }
+  let j;
+  try { j = await r.json(); } catch (e) { throw new Error('Apps Script 回傳格式不對：網址要是 /exec 結尾的部署網址'); }
+  if (!j.ok) throw new Error(j.error || '未知錯誤');
+  return j.data;
+}
+function call(fn, args, msg, after) {
+  toast('處理中…');
+  api(ACTIONS[fn], args)
+    .then(ns => { S = ns; if (after) after(); render(); toast(msg); })
+    .catch(e => toast(e.message, true));
+}
+function load() {
+  loading = true; loadErr = ''; render();
+  api('all').then(d => { S = d; }).catch(e => { loadErr = e.message; })
+    .finally(() => { loading = false; render(); });
+}
+function h(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
+
+document.querySelectorAll('.tab').forEach(b => b.onclick = () => { tab = b.dataset.t; render(); });
+
+function banners() {
+  let s = '';
+  if (S.paused) s += '<div class="banner red">全部暫停中：什麼信都不會寄（設定 → 狀態）</div>';
+  if (S.testMode) s += '<div class="banner">測試模式中：實際只會寄給你自己（設定 → 狀態）</div>';
+  return s;
+}
+
+/* ── 信件 ── */
+function renderMails() {
+  main.innerHTML = banners();
+  const grid = h('div', 'grid'); main.appendChild(grid);
+  S.mails.forEach(st => grid.appendChild(mailCard(st)));
+}
+
+function mailCard(st) {
+  const el = h('div', 'card');
+  const badges = (st.edited ? '<span class="badge b-edit">已修改</span>' : '') + (st.cancelled ? '<span class="badge b-cancel">已取消</span>' : '');
+  const sub = st.kind === 'monday' ? '開會通知' : '下兩週通知';
+  if (!st.defaults) {
+    el.innerHTML = '<h2>' + st.label + '・' + sub + badges + '</h2><div class="meta">' + esc_(st.dayText) + '</div>' +
+      '<div class="empty">' + esc_(st.reason) + '<br>要調整就到「排程」分頁。</div>';
+    return el;
+  }
+  const when = st.dayText + ' ' + st.sendHour + ' 點寄出（' + st.previewText + '）';
+  el.innerHTML =
+    '<h2>' + st.label + '・' + sub + badges + '</h2><div class="meta">' + esc_(when) + '</div>' +
+    '<label>收件人（逗號分隔）</label><input data-f="to">' +
+    '<label>主旨</label><input data-f="subject">' +
+    '<label>內文</label><textarea data-f="body"></textarea>' +
+    '<div class="hint">連結：[文字](網址)　粗體：**文字**</div>' +
+    '<label>預覽</label><div class="preview"></div>' +
+    '<div class="row"><button data-a="save">儲存</button><button class="sec" data-a="reset">恢復原本</button></div>' +
+    '<div class="row"><button class="sec" data-a="test">寄一封給自己看看</button>' +
+    '<button class="' + (st.cancelled ? 'sec' : 'danger') + '" data-a="cancel">' + (st.cancelled ? '恢復寄送' : '取消這次寄送') + '</button></div>';
+  const q = s => el.querySelector(s);
+  const u = unsaved[st.kind] || {};
+  ['to', 'subject', 'body'].forEach(f => {
+    const inp = q('[data-f="' + f + '"]');
+    inp.value = f in u ? u[f] : st[f];
+    inp.addEventListener('input', () => { (unsaved[st.kind] = unsaved[st.kind] || {})[f] = inp.value; if (f === 'body') pv(); });
+  });
+  const pv = () => q('.preview').innerHTML = editableToHtml_(q('[data-f="body"]').value);
+  pv();
+  const clear = () => { delete unsaved[st.kind]; };
+  const args = rest => [st.kind, st.targetDate].concat(rest);
+  q('[data-a="save"]').onclick = () => call('webSave', args([q('[data-f="to"]').value, q('[data-f="subject"]').value, q('[data-f="body"]').value]), '已儲存 ✓', clear);
+  q('[data-a="reset"]').onclick = () => call('webReset', args([]), '已恢復原本內容', clear);
+  q('[data-a="test"]').onclick = () => {
+    if (unsaved[st.kind]) { toast('有還沒儲存的修改，先按「儲存」', true); return; }
+    call('webSendTest', args([]), '已寄到你的信箱');
+  };
+  q('[data-a="cancel"]').onclick = () => call('webSetCancelled', args([!st.cancelled]), st.cancelled ? '已恢復寄送' : '已取消這次寄送');
+  return el;
+}
+
+/* ── 排程 ── */
+function renderSched() {
+  main.innerHTML = banners() + '<div class="meta" style="margin-bottom:12px">停辦（含國定假日）不算輪次，後面的人自動往後推；換報告人只影響那一場。</div>';
+  S.slots.forEach(s => main.appendChild(slotCard(s)));
+}
+
+function slotCard(s) {
+  const el = h('div', 'card');
+  let badges = '';
+  if (s.skipped) badges += '<span class="badge ' + (s.adj && s.adj.skip === 'true' ? 'b-skip' : 'b-hol') + '">' + esc_(s.skipReason) + '</span>';
+  else if (s.holiday) badges += '<span class="badge b-hol">放假照開：' + esc_(s.holiday) + '</span>';
+  if (s.adj && !s.skipped && (s.adj.time || s.adj.place || s.adj.speakers || s.adj.note)) badges += '<span class="badge b-edit">已調整</span>';
+  const who = s.skipped ? '（這週不開）' : esc_(s.speakers.join('、'));
+  const info = s.skipped ? '' : esc_(s.time + '・' + s.place) + (s.note ? '<br>備註：' + esc_(s.note) : '');
+  const open = openSlots.has(s.dateStr);
+  el.innerHTML =
+    '<div class="slot' + (s.skipped ? ' off' : '') + '"><div><h2>' + esc_(s.dayText) + badges + '</h2>' +
+    '<div class="who">' + who + '</div><div class="meta">' + info + '</div></div>' +
+    '<button class="sec small" data-a="toggle">' + (open ? '收起' : '調整') + '</button></div>';
+  el.querySelector('[data-a="toggle"]').onclick = () => { open ? openSlots.delete(s.dateStr) : openSlots.add(s.dateStr); render(); };
+  if (!open) return el;
+
+  const a = s.adj || { skip: '', time: '', place: '', speakers: '', note: '' };
+  const f = h('div', '',
+    '<label>這週開不開</label><select data-f="skip">' +
+      '<option value="">自動（國定假日就停）</option><option value="true">停辦</option><option value="false">照開（就算放假）</option></select>' +
+    '<label>報告人（頓號分隔，留空照輪替）</label><input data-f="speakers">' +
+    '<div class="hint">照輪替是：' + esc_((s.defaultSpeakers.length ? s.defaultSpeakers : ['（停辦時不輪）']).join('、')) + '</div>' +
+    '<label>時間（留空用預設）</label><input data-f="time">' +
+    '<label>地點（留空用預設）</label><input data-f="place">' +
+    '<label>備註（會加進這場的信）</label><input data-f="note">' +
+    '<div class="row"><button data-a="save">儲存</button><button class="sec" data-a="clear">清除這週的調整</button></div>');
+  el.appendChild(f);
+  const q = x => f.querySelector('[data-f="' + x + '"]');
+  ['skip', 'speakers', 'time', 'place', 'note'].forEach(k => q(k).value = a[k] || '');
+  q('speakers').placeholder = s.defaultSpeakers.join('、');
+  q('time').placeholder = S.defaultTime; q('place').placeholder = S.defaultPlace;
+  const vals = () => ({ skip: q('skip').value, speakers: q('speakers').value, time: q('time').value, place: q('place').value, note: q('note').value });
+  f.querySelector('[data-a="save"]').onclick = () => call('webSaveAdjust', [s.dateStr, vals()], '已儲存 ✓', () => openSlots.delete(s.dateStr));
+  f.querySelector('[data-a="clear"]').onclick = () => call('webSaveAdjust', [s.dateStr, {}], '已清除', () => openSlots.delete(s.dateStr));
+  return el;
+}
+
+/* ── 設定 ── */
+function renderSettings() {
+  main.innerHTML = banners();
+  const byKey = {}; S.config.forEach(c => byKey[c.key] = c);
+  const form = h('div');
+  GROUPS.forEach(([title, keys]) => {
+    const card = h('div', 'card', '<h3>' + title + '</h3>');
+    keys.forEach(k => {
+      const c = byKey[k]; if (!c) return;
+      if (BOOLS.includes(k)) {
+        card.appendChild(h('label', 'check', '<input type="checkbox" data-k="' + esc_(k) + '"' + (/^true$/i.test(c.value) ? ' checked' : '') + '> ' + esc_(k)));
+      } else {
+        card.appendChild(h('label', '', esc_(k)));
+        const inp = h('input'); inp.dataset.k = k; inp.value = c.value; card.appendChild(inp);
+      }
+      if (c.note) card.appendChild(h('div', 'hint', esc_(c.note)));
+    });
+    form.appendChild(card);
+  });
+  const lists = h('div', 'card',
+    '<h3>名單</h3><label>報告順序（一行一位，由上往下輪）</label><textarea class="short" data-l="roster"></textarea>' +
+    '<label>祝福語（一行一句，「祝大家 ___」）</label><textarea class="short" data-l="greetings"></textarea>');
+  form.appendChild(lists);
+  lists.querySelector('[data-l="roster"]').value = S.roster.join('\n');
+  lists.querySelector('[data-l="greetings"]').value = S.greetings.join('\n');
+  const btn = h('div', 'row', '<button data-a="save">儲存設定</button>');
+  form.appendChild(btn);
+  const conn = h('div', 'card', '<h3>這台裝置的連線</h3><div class="meta">Apps Script：' + esc_(GAS_URL) + '</div>' +
+    '<div class="row"><button class="sec" data-a="relogin">更換網址或金鑰</button></div>');
+  form.appendChild(conn);
+  main.appendChild(form);
+  conn.querySelector('[data-a="relogin"]').onclick = () => { if (confirm('要清掉這台裝置記住的網址和金鑰嗎？')) { LS.del('gas_key'); KEY = ''; S = null; render(); } };
+  btn.querySelector('button').onclick = () => {
+    const values = {};
+    form.querySelectorAll('[data-k]').forEach(inp => values[inp.dataset.k] = inp.type === 'checkbox' ? (inp.checked ? 'TRUE' : 'FALSE') : inp.value);
+    const lines = sel => form.querySelector(sel).value.split('\n');
+    call('webSaveSettings', [values, lines('[data-l="roster"]'), lines('[data-l="greetings"]')], '設定已儲存 ✓');
+  };
+}
+
+/* ── 第一次使用：填 Apps Script 網址和金鑰 ── */
+function renderLogin(msg) {
+  document.querySelector('.tabs').style.display = 'none';
+  main.innerHTML = '';
+  const card = h('div', 'card',
+    '<h2>連線到 Apps Script</h2><div class="meta">只需要設定一次，會記在這台裝置的瀏覽器裡。</div>' +
+    (msg ? '<div class="banner red">' + esc_(msg) + '</div>' : '') +
+    '<label>部署網址（/exec 結尾）</label><input data-f="url" placeholder="https://script.google.com/macros/s/.../exec">' +
+    '<label>金鑰</label><input data-f="key" placeholder="在 Apps Script 執行 showBotConfig 可以看到">' +
+    '<div class="row"><button data-a="go">連線</button></div>');
+  main.appendChild(card);
+  const q = f => card.querySelector('[data-f="' + f + '"]');
+  q('url').value = GAS_URL; q('key').value = KEY;
+  card.querySelector('[data-a="go"]').onclick = () => {
+    GAS_URL = normUrl(q('url').value); KEY = q('key').value.trim();
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(GAS_URL)) { toast('網址看起來不對，要是 /exec 結尾的部署網址', true); return; }
+    if (!KEY) { toast('金鑰不能空白', true); return; }
+    LS.set('gas_url', GAS_URL); LS.set('gas_key', KEY);
+    load();
+  };
+}
+
+function render() {
+  if (!GAS_URL || !KEY) return renderLogin();
+  if (loading && !S) { document.querySelector('.tabs').style.display = 'none'; main.innerHTML = '<div class="empty">讀取中…</div>'; return; }
+  if (!S) return renderLogin(loadErr || '讀取失敗');
+  document.querySelector('.tabs').style.display = '';
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.t === tab));
+  ({ mails: renderMails, sched: renderSched, settings: renderSettings })[tab]();
+}
+if (GAS_URL && KEY) load(); else render();
+</script></body></html>
